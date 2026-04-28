@@ -11,8 +11,16 @@ import {
   createPaymentIntent, 
   handleStripeWebhook 
 } from '../controllers/commission.controller';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
+
+// Rate limiting for public form submissions
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 requests per `window`
+  message: 'Too many requests from this IP, please try again after 15 minutes'
+});
 
 // Configure multer for memory storage (we will upload directly to Supabase)
 const upload = multer({
@@ -31,11 +39,11 @@ router.get('/portfolio-items/:id', getPortfolioItemById);
 router.get('/teasers', getTeasers);
 
 // Newsletter
-router.post('/subscribe-newsletter', subscribeNewsletter);
+router.post('/subscribe-newsletter', apiLimiter, subscribeNewsletter);
 
 // Commissions
-router.post('/submit-commission', upload.array('files', 5), submitCommission);
-router.post('/create-payment-intent', createPaymentIntent);
+router.post('/submit-commission', apiLimiter, upload.array('files', 5), submitCommission);
+router.post('/create-payment-intent', apiLimiter, createPaymentIntent);
 
 // Webhooks
 // Note: This endpoint must receive raw body, which is handled in index.ts

@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { stripe } from '../services/stripe';
 import crypto from 'crypto';
 import Stripe from 'stripe';
+import sanitizeHtml from 'sanitize-html';
 
 // Helper to generate order ref
 const generateOrderRef = () => {
@@ -23,13 +24,37 @@ export const submitCommission = async (req: Request, res: Response) => {
       });
     }
 
+    const priceMin = parseInt(tier_price_min);
+    const priceMax = parseInt(tier_price_max);
+
+    if (isNaN(priceMin) || isNaN(priceMax)) {
+      return res.status(400).json({ success: false, error: 'Invalid price range' });
+    }
+
+    // Sanitize text inputs
+    const cleanDescription = sanitizeHtml(description);
+    const cleanStyle = sanitizeHtml(style || '');
+    const cleanNotes = sanitizeHtml(notes || '');
+
     const order_ref = generateOrderRef();
     const uploadedFileUrls: string[] = [];
 
     // Upload files to Supabase Storage if present
     if (files && files.length > 0) {
+      const allowedMimeTypes: Record<string, string> = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'application/pdf': 'pdf'
+      };
+
       for (const file of files) {
-        const fileExt = file.originalname.split('.').pop();
+        const fileExt = allowedMimeTypes[file.mimetype];
+        if (!fileExt) {
+          console.warn(`Blocked upload of unsupported type: ${file.mimetype}`);
+          continue; // Skip unsupported types
+        }
+
         const fileName = `${order_ref}/${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${fileExt}`;
         
         const { data, error } = await supabase.storage
@@ -59,12 +84,12 @@ export const submitCommission = async (req: Request, res: Response) => {
       .insert([{
         order_ref,
         tier_name,
-        tier_price_min: parseInt(tier_price_min),
-        tier_price_max: parseInt(tier_price_max),
-        description,
+        tier_price_min: priceMin,
+        tier_price_max: priceMax,
+        description: cleanDescription,
         email,
-        style,
-        notes,
+        style: cleanStyle,
+        notes: cleanNotes,
         reference_files: uploadedFileUrls,
         status: 'pending_payment'
       }])
@@ -85,13 +110,13 @@ export const submitCommission = async (req: Request, res: Response) => {
 
 export const createPaymentIntent = async (req: Request, res: Response) => {
   try {
-    const { commissionId, amount, currency = 'usd' } = req.body;
+    const { commissionId, currency = 'usd' } = req.body;
 
-    if (!commissionId || !amount) {
-      return res.status(400).json({ success: false, error: 'Missing commissionId or amount' });
+    if (!commissionId) {
+      return res.status(400).json({ success: false, error: 'Missing commissionId' });
     }
 
-    // Optional: Verify commission exists in DB
+    // Verify commission exists in DB
     const { data: commission, error } = await supabase
       .from('commissions')
       .select('*')
@@ -102,9 +127,12 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Commission not found' });
     }
 
+    // Authoritative server-side price calculation
+    const requiredAmount = commission.tier_price_min * 100; // deposit or full minimum price in cents
+
     // Create a PaymentIntent with the order amount and currency
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: parseInt(amount), // in cents
+      amount: requiredAmount,
       currency,
       metadata: {
         commissionId,

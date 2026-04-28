@@ -1,0 +1,72 @@
+name: Security Audit Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  secret-scanning:
+    name: TruffleHog Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # Fetch all history for all tags and branches so TruffleHog can scan commit history
+          fetch-depth: 0
+          
+      - name: TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+  dependency-audit:
+    name: Dependency Audit (npm)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # -- Frontend Audit --
+      - name: Install Frontend Dependencies
+        run: npm ci
+        
+      - name: Frontend NPM Audit
+        # Runs audit and fails the pipeline if any High or Critical vulnerabilities are found
+        run: npm audit --audit-level=high
+
+      # -- Backend Audit --
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+        
+      - name: Backend NPM Audit
+        working-directory: ./backend
+        run: npm audit --audit-level=high
+
+  sast-semgrep:
+    name: Semgrep Static Analysis (SAST)
+    runs-on: ubuntu-latest
+    container:
+      # Use Semgrep's official container for best performance
+      image: returntocorp/semgrep
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Semgrep Analysis
+        # Runs standard OWASP Top 10, JavaScript, and TypeScript rulesets
+        run: semgrep ci --config="p/default" --config="p/owasp-top-ten" --config="p/javascript" --config="p/typescript"
+        env:
+          # Optional but recommended for viewing results in the GitHub Security tab
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
