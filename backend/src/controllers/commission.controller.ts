@@ -12,11 +12,10 @@ const generateOrderRef = () => {
 
 export const submitCommission = async (req: Request, res: Response) => {
   try {
-    const { tier_name, tier_price_min, tier_price_max, description, email, style, notes } = req.body;
+    const { tier_name, description, email, style, notes } = req.body;
     const files = req.files as Express.Multer.File[];
 
-    // Basic validation
-    if (!tier_name || !tier_price_min || !tier_price_max || !description || !email) {
+    if (!tier_name || !description || !email) {
       return res.status(400).json({ 
         success: false, 
         error: 'Validation failed',
@@ -24,12 +23,20 @@ export const submitCommission = async (req: Request, res: Response) => {
       });
     }
 
-    const priceMin = parseInt(tier_price_min);
-    const priceMax = parseInt(tier_price_max);
+    // 1. Fix Source-of-Truth Poisoning (Server-Side Pricing Dictionary)
+    const TIER_PRICING: Record<string, { min: number, max: number }> = {
+      'Polished Sketch': { min: 50, max: 80 },
+      'Half-Body Color': { min: 120, max: 180 },
+      'Full Render': { min: 250, max: 450 }
+    };
 
-    if (isNaN(priceMin) || isNaN(priceMax)) {
-      return res.status(400).json({ success: false, error: 'Invalid price range' });
+    const authoritativeTier = TIER_PRICING[tier_name];
+    if (!authoritativeTier) {
+      return res.status(400).json({ success: false, error: 'Invalid tier_name provided.' });
     }
+
+    const priceMin = authoritativeTier.min;
+    const priceMax = authoritativeTier.max;
 
     // Sanitize text inputs
     const cleanDescription = sanitizeHtml(description);
@@ -44,16 +51,13 @@ export const submitCommission = async (req: Request, res: Response) => {
       const allowedMimeTypes: Record<string, string> = {
         'image/jpeg': 'jpg',
         'image/png': 'png',
-        'image/webp': 'webp',
-        'application/pdf': 'pdf'
+        'image/webp': 'webp'
       };
 
       for (const file of files) {
         const fileExt = allowedMimeTypes[file.mimetype];
-        if (!fileExt) {
-          console.warn(`Blocked upload of unsupported type: ${file.mimetype}`);
-          continue; // Skip unsupported types
-        }
+        // Note: Multer already filters invalid types now, but doing a double check is safe
+        if (!fileExt) continue;
 
         const fileName = `${order_ref}/${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${fileExt}`;
         

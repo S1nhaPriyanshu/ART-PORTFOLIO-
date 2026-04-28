@@ -5,8 +5,15 @@ import apiRoutes from './routes/api';
 
 dotenv.config();
 
+if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
+  throw new Error('FATAL: FRONTEND_URL is required in production environment.');
+}
+
 const app = express();
 const port = process.env.PORT || 3001;
+
+// 2. Fix Reverse Proxy IP Spoofing
+app.set('trust proxy', 1);
 
 // Middleware
 // Webhooks need raw body for signature verification
@@ -19,9 +26,7 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
-    : (process.env.FRONTEND_URL || 'http://localhost:3000'),
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
 
@@ -36,6 +41,15 @@ app.get('/health', (req, res) => {
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);
+  
+  if (err.message && err.message.includes('Invalid file type detected')) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bad Request',
+      message: err.message
+    });
+  }
+
   res.status(500).json({
     success: false,
     error: 'Internal Server Error',

@@ -28,6 +28,15 @@ const upload = multer({
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB
     files: 5
+  },
+  fileFilter: (req, file, cb) => {
+    // 3. Fix File Upload Silent Fails
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type detected. Only JPG, PNG, and WEBP are allowed.'));
+    }
   }
 });
 

@@ -9,7 +9,7 @@ if (!stripeSecretKey) {
 }
 
 export const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: '2026-04-22.dahlia',
+  apiVersion: '2025-02-24.acacia',
   appInfo: {
     name: 'Atelier Tenebris',
     version: '1.0.0',
