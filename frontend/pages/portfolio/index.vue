@@ -1,5 +1,5 @@
 <template>
-  <div class="portfolio-page">
+  <div class="portfolio-page" @wheel.prevent="onWheel" @touchstart="onTouchStart" @touchmove.prevent="onTouchMove">
     
     <!-- Main Background Artwork -->
     <Transition name="fade-bg" mode="out-in">
@@ -11,7 +11,7 @@
 
     <!-- Header & Info Overlay -->
     <div class="info-overlay">
-      <ChapterMarker :number="1" title="PORTFOLIO" />
+      <ChapterMarker :number="activeWorkIndex + 1" title="PORTFOLIO" />
       <Transition name="slide-up" mode="out-in">
         <div :key="activeWork.id" class="artwork-info">
           <span class="info-cat">{{ activeWork.category }}</span>
@@ -26,7 +26,7 @@
     </div>
 
     <!-- Arc Menu Area -->
-    <div class="arc-menu-wrapper" @wheel.prevent="onWheel">
+    <div class="arc-menu-wrapper">
       <div class="arc-container">
         <div 
           v-for="(work, i) in filteredWorks" 
@@ -41,35 +41,38 @@
       </div>
       <div class="scroll-instruction">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-        <span>Scroll to Explore</span>
+        <span>{{ isMobile ? 'Swipe to Explore' : 'Scroll to Explore' }}</span>
       </div>
     </div>
 
     <!-- Lightbox -->
-    <Teleport to="body">
-      <Transition name="lightbox">
-        <div v-if="lightboxOpen" class="lightbox" @click.self="closeLightbox" id="lightbox">
-          <button class="lb-close" @click="closeLightbox" aria-label="Close">✕</button>
-          <div class="lb-content">
-            <img :src="currentWork?.image" :alt="currentWork?.title" />
-            <div class="lb-info">
-              <span class="text-mono">{{ currentWork?.category }}</span>
-              <h3>{{ currentWork?.title }}</h3>
-              <p>{{ currentWork?.description }}</p>
+    <ClientOnly>
+      <Teleport to="body">
+        <Transition name="lightbox">
+          <div v-if="lightboxOpen" class="lightbox" @click.self="closeLightbox" id="lightbox">
+            <button class="lb-close" @click="closeLightbox" aria-label="Close">✕</button>
+            <div class="lb-content">
+              <img :src="currentWork?.image" :alt="currentWork?.title" />
+              <div class="lb-info">
+                <span class="text-mono">{{ currentWork?.category }}</span>
+                <h3>{{ currentWork?.title }}</h3>
+                <p>{{ currentWork?.description }}</p>
+              </div>
             </div>
           </div>
-        </div>
-      </Transition>
-    </Teleport>
+        </Transition>
+      </Teleport>
+    </ClientOnly>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import gsap from 'gsap'
 
 useHead({ title: 'Portfolio — Atelier Tenebris', meta: [{ name: 'description', content: 'Portfolio — environments, concept art, and digital paintings by Atelier Tenebris.' }] })
 
+const isMobile = ref(false)
 const categories = ['All', 'Environment', 'Concept Art', 'Landscape']
 const activeCategory = ref('All')
 
@@ -93,18 +96,46 @@ const scrollAngle = ref(0)
 let targetScrollAngle = 0
 let isScrolling = false
 
-const radius = 600
-const centerX = -480
-const centerY = 0
-const angleSpacing = 20
+const radius = ref(600)
+const centerX = ref(-480)
+const centerY = ref(0)
+const angleSpacing = ref(20)
+
+let resizeHandler = null
+
+onMounted(() => {
+  const updateDimensions = () => {
+    if (window.innerWidth <= 768) {
+      isMobile.value = true
+      radius.value = 350
+      centerX.value = -300
+      angleSpacing.value = 25
+    } else {
+      isMobile.value = false
+      radius.value = 600
+      centerX.value = -480
+      angleSpacing.value = 20
+    }
+  }
+  
+  updateDimensions()
+  resizeHandler = updateDimensions
+  window.addEventListener('resize', resizeHandler)
+})
+
+onUnmounted(() => {
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+  }
+})
 
 function getArcStyle(index) {
-  const itemBaseAngle = index * angleSpacing
+  const itemBaseAngle = index * angleSpacing.value
   const currentAngle = itemBaseAngle + scrollAngle.value
   const rad = currentAngle * (Math.PI / 180)
   
-  const x = centerX + (radius * Math.cos(rad))
-  const y = centerY + (radius * Math.sin(rad))
+  const x = centerX.value + (radius.value * Math.cos(rad))
+  const y = centerY.value + (radius.value * Math.sin(rad))
   
   let normalizedDist = Math.abs(currentAngle) % 360
   if (normalizedDist > 180) normalizedDist = 360 - normalizedDist
@@ -121,7 +152,7 @@ function getArcStyle(index) {
 }
 
 watch(scrollAngle, (newAngle) => {
-  let rawIndex = Math.round(-newAngle / angleSpacing)
+  let rawIndex = Math.round(-newAngle / angleSpacing.value)
   const maxIndex = filteredWorks.value.length - 1
   
   if (rawIndex < 0) rawIndex = 0
@@ -145,8 +176,41 @@ function onWheel(e) {
   selectWork(newIndex)
 }
 
+// Touch Handling for Mobile
+let touchStartY = 0
+let touchStartX = 0
+
+function onTouchStart(e) {
+  touchStartY = e.touches[0].clientY
+  touchStartX = e.touches[0].clientX
+}
+
+function onTouchMove(e) {
+  if (isScrolling) return
+  
+  const touchEndY = e.touches[0].clientY
+  const touchEndX = e.touches[0].clientX
+  const deltaY = touchStartY - touchEndY
+  const deltaX = touchStartX - touchEndX
+  
+  // Trigger if scroll is more vertical than horizontal and distance > 30px
+  if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 30) {
+    const direction = Math.sign(deltaY)
+    const maxIndex = filteredWorks.value.length - 1
+    
+    let newIndex = activeWorkIndex.value + direction
+    if (newIndex < 0) newIndex = 0
+    if (newIndex > maxIndex) newIndex = maxIndex
+    
+    if (newIndex !== activeWorkIndex.value) {
+      selectWork(newIndex)
+      touchStartY = touchEndY // Reset to wait for next distinct swipe motion
+    }
+  }
+}
+
 function selectWork(index) {
-  targetScrollAngle = -(index * angleSpacing)
+  targetScrollAngle = -(index * angleSpacing.value)
   isScrolling = true
   
   gsap.to(scrollAngle, {
@@ -235,6 +299,7 @@ function closeLightbox() { lightboxOpen.value = false; }
   width: 300px;
   height: 100%;
   z-index: 20;
+  pointer-events: none;
 }
 
 .arc-container {
@@ -258,6 +323,7 @@ function closeLightbox() { lightboxOpen.value = false; }
   box-shadow: 0 10px 20px rgba(0,0,0,0.5);
   transition: border-color var(--duration-fast);
   will-change: transform, opacity;
+  pointer-events: auto;
 }
 
 .arc-item.active {
@@ -303,9 +369,11 @@ function closeLightbox() { lightboxOpen.value = false; }
 .lightbox-enter-from, .lightbox-leave-to { opacity: 0; }
 
 @media (max-width: 768px) { 
-  .info-overlay { left: 160px; max-width: calc(100vw - 180px); }
-  .info-title { font-size: 2rem; }
-  .info-desc { font-size: 0.95rem; }
-  .arc-item { width: 80px; height: 80px; margin-top: -40px; margin-left: -40px; }
+  .info-overlay { left: 100px; max-width: calc(100vw - 120px); }
+  .info-title { font-size: 2.2rem; }
+  .info-desc { font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .arc-item { width: 70px; height: 70px; margin-top: -35px; margin-left: -35px; }
+  .info-cat { margin-top: 1rem; margin-bottom: 0.5rem; }
+  .scroll-instruction { bottom: 1.5rem; left: 1.5rem; }
 }
 </style>
